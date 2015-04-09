@@ -48,6 +48,6 @@ func (c *Fake) DockerImagesFsInfo() (cadvisorApiV2.FsInfo, error) {
 	return cadvisorApiV2.FsInfo{}, nil
 }
 
-func (c *Fake) GetPastEvents(request *events.Request) ([]*cadvisorApi.Event, error) {
-	return []*cadvisorApi.Event{}, nil
+func (self *Fake) WatchForEvents(request *events.Request) (*events.EventChannel, error) {
+	return new(events.EventChannel), nil
 }

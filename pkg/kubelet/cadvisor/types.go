@@ -33,6 +33,6 @@ type Interface interface {
 	// Returns usage information about the filesystem holding Docker images.
 	DockerImagesFsInfo() (cadvisorApiV2.FsInfo, error)
 
-	// Get past events that have been detected and that fit the request.
-	GetPastEvents(request *events.Request) ([]*cadvisorApi.Event, error)
+	// Get events streamed through passedChannel that fit the request.
+	WatchForEvents(request *events.Request) (*events.EventChannel, error)
 }
