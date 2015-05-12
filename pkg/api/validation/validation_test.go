@@ -17,6 +17,7 @@ limitations under the License.
 package validation
 
 import (
+	"math/rand"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +51,34 @@ func TestValidateObjectMetaCustomName(t *testing.T) {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 	if !strings.Contains(errs[0].Error(), "name-gen") {
+		t.Errorf("unexpected error message: %v", errs)
+	}
+}
+
+// Ensure namespace names follow dns label format
+func TestValidateObjectMetaNamespaces(t *testing.T) {
+	errs := ValidateObjectMeta(&api.ObjectMeta{Name: "test", Namespace: "foo.bar"}, false, func(s string, prefix bool) (bool, string) {
+		return true, ""
+	})
+	if len(errs) != 1 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	if !strings.Contains(errs[0].Error(), "invalid value 'foo.bar'") {
+		t.Errorf("unexpected error message: %v", errs)
+	}
+	maxLength := 63
+	letters := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+	b := make([]rune, maxLength+1)
+	for i := range b {
+		b[i] = letters[rand.Intn(len(letters))]
+	}
+	errs = ValidateObjectMeta(&api.ObjectMeta{Name: "test", Namespace: string(b)}, false, func(s string, prefix bool) (bool, string) {
+		return true, ""
+	})
+	if len(errs) != 1 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	if !strings.Contains(errs[0].Error(), "invalid value") {
 		t.Errorf("unexpected error message: %v", errs)
 	}
 }
@@ -1410,7 +1439,7 @@ func TestValidateService(t *testing.T) {
 		{
 			name: "too long name",
 			tweakSvc: func(s *api.Service) {
-				s.Name = strings.Repeat("a", 25)
+				s.Name = strings.Repeat("a", 65)
 			},
 			numErrs: 1,
 		},
@@ -1424,7 +1453,7 @@ func TestValidateService(t *testing.T) {
 		{
 			name: "too long generateName",
 			tweakSvc: func(s *api.Service) {
-				s.GenerateName = strings.Repeat("a", 25)
+				s.GenerateName = strings.Repeat("a", 65)
 			},
 			numErrs: 1,
 		},
@@ -2501,7 +2530,7 @@ func TestValidateLimitRange(t *testing.T) {
 		},
 		"invalid Namespace": {
 			api.LimitRange{ObjectMeta: api.ObjectMeta{Name: "abc", Namespace: "^Invalid"}, Spec: spec},
-			dnsSubdomainErrorMsg,
+			dns1123LabelErrorMsg,
 		},
 	}
 	for k, v := range errorCases {
@@ -2568,7 +2597,7 @@ func TestValidateResourceQuota(t *testing.T) {
 		},
 		"invalid Namespace": {
 			api.ResourceQuota{ObjectMeta: api.ObjectMeta{Name: "abc", Namespace: "^Invalid"}, Spec: spec},
-			dnsSubdomainErrorMsg,
+			dns1123LabelErrorMsg,
 		},
 	}
 	for k, v := range errorCases {
@@ -2976,7 +3005,7 @@ func TestValidateEndpoints(t *testing.T) {
 		"invalid namespace": {
 			endpoints:   api.Endpoints{ObjectMeta: api.ObjectMeta{Name: "mysvc", Namespace: "no@#invalid.;chars\"allowed"}},
 			errorType:   "FieldValueInvalid",
-			errorDetail: dnsSubdomainErrorMsg,
+			errorDetail: dns1123LabelErrorMsg,
 		},
 		"invalid name": {
 			endpoints:   api.Endpoints{ObjectMeta: api.ObjectMeta{Name: "-_Invliad^&Characters", Namespace: "namespace"}},

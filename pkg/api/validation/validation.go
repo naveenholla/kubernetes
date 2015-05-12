@@ -112,7 +112,7 @@ func ValidateReplicationControllerName(name string, prefix bool) (bool, string) 
 // Prefix indicates this name will be used as part of generation, in which case
 // trailing dashes are allowed.
 func ValidateServiceName(name string, prefix bool) (bool, string) {
-	return nameIsDNS952Label(name, prefix)
+	return nameIsDNS1123Label(name, prefix)
 }
 
 // ValidateNodeName can be used to check whether the given node name is valid.
@@ -126,7 +126,7 @@ func ValidateNodeName(name string, prefix bool) (bool, string) {
 // Prefix indicates this name will be used as part of generation, in which case
 // trailing dashes are allowed.
 func ValidateNamespaceName(name string, prefix bool) (bool, string) {
-	return nameIsDNSSubdomain(name, prefix)
+	return nameIsDNS1123Label(name, prefix)
 }
 
 // ValidateLimitRangeName can be used to check whether the given limit range name is valid.
@@ -176,15 +176,15 @@ func nameIsDNSSubdomain(name string, prefix bool) (bool, string) {
 	return false, dnsSubdomainErrorMsg
 }
 
-// nameIsDNS952Label is a ValidateNameFunc for names that must be a DNS 952 label.
-func nameIsDNS952Label(name string, prefix bool) (bool, string) {
+// nameIsDNS1123Label is a ValidateNameFunc for names that must be a DNS 1123 label.
+func nameIsDNS1123Label(name string, prefix bool) (bool, string) {
 	if prefix {
 		name = maskTrailingDash(name)
 	}
-	if util.IsDNS952Label(name) {
+	if util.IsDNS1123Label(name) {
 		return true, ""
 	}
-	return false, dns952LabelErrorMsg
+	return false, dns1123LabelErrorMsg
 }
 
 // ValidateObjectMeta validates an object's metadata on creation. It expects that name generation has already
@@ -210,8 +210,8 @@ func ValidateObjectMeta(meta *api.ObjectMeta, requiresNamespace bool, nameFn Val
 	if requiresNamespace {
 		if len(meta.Namespace) == 0 {
 			allErrs = append(allErrs, errs.NewFieldRequired("namespace"))
-		} else if !util.IsDNS1123Subdomain(meta.Namespace) {
-			allErrs = append(allErrs, errs.NewFieldInvalid("namespace", meta.Namespace, dnsSubdomainErrorMsg))
+		} else if ok, _ := ValidateNamespaceName(meta.Namespace, false); !ok {
+			allErrs = append(allErrs, errs.NewFieldInvalid("namespace", meta.Namespace, dns1123LabelErrorMsg))
 		}
 	} else {
 		if len(meta.Namespace) != 0 {
