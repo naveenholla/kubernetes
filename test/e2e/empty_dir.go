@@ -75,6 +75,37 @@ var _ = Describe("emptyDir", func() {
 			"content of file \"/test-volume/test-file\": mount-tester new file",
 		})
 	})
+
+	It("volume contents must be visible and accessible across containers", func() {
+		volumePath := "/test-volume"
+		testFile := path.Join(volumePath, "test-file")
+		source := &api.EmptyDirVolumeSource{}
+		pod := testPodWithVolume(volumePath, source)
+		pod.Spec.RestartPolicy = api.RestartPolicyNever
+		pod.Spec.Containers[0].Name = "writer"
+		pod.Spec.Containers[0].Image = "busybox"
+		pod.Spec.Containers[0].Args = []string{
+			"/bin/sh",
+			"-c",
+			fmt.Sprintf("echo ok > %s", testFile),
+		}
+		pod.Spec.Containers = append(pod.Spec.Containers,
+			api.Container{
+				Name:  "reader",
+				Image: "busybox",
+				Args: []string{
+					"/bin/sh",
+					"-c",
+					fmt.Sprintf("while [ ! -f %s ]; do sleep 2; done; grep -q \"ok\" %s; exit $?", testFile, testFile),
+				},
+				VolumeMounts: pod.Spec.Containers[0].VolumeMounts,
+			})
+		_, err := c.Pods(api.NamespaceDefault).Create(pod)
+		expectNoError(err)
+		expectNoError(waitForPodRunning(c, pod.Name))
+		expectNoError(waitForPodSuccess(c, pod.Name, "reader"))
+	})
+
 })
 
 const containerName = "test-container"
