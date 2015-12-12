@@ -33,33 +33,35 @@ Documentation for other releases can be found at
 
 # Kubernetes compute resource metrics API
 
+*This is a design document for adding a new feature in Kubernetes, Compute Resource Metrics APIs.*
+
 ## Goals
 
-Provide resource usage metrics on pods and nodes through the API server to be
-used by the scheduler to improve pod placement, utilization, etc. and by end
-users to understand the resource utilization of their jobs. Horizontal and
-vertical auto-scaling are also near-term uses. Additionally, a subset of the
-metrics API should be served directly from the kubelet.
+Provide resource usage metrics on pods and nodes through the API server.
+Use cases include the scheduler, end users and various flavors of auto-scaling.
+
+These APIs are expected to be available on all Kubernetes deployments.
+Core features like Quality of Service will depend on this API and QoS semantics should not change across deployments.
+
+Expose `cpu` and `memory` metrics to begin with.
+`disk` might be added in the future.
+
+The minimum resolution will be a minute by default.
+Users will have the ability to adjust the resolution in their deployments.
+
+The scope is limited to statistical data only.
+Historical timeseries metrics data is out of scope.
 
 ### API Requirements
 
-- Provide machine level metrics, all pod metrics (in single request), specific
-  pod metrics
-- Ability to authenticate machine & pod metrics independently from each other
-- Support multiple kinds of metrics (e.g. raw & derived types)
-- Follow existing API conventions, fully compatible types able to eventually be
-  served by apiserver library
-- Maximum common ground between cluster and Kubelet API.
+- Provide node level metrics, all pod metrics (in single request), specific pod metrics
+- Ability to authenticate node & pod metrics independently from each other
+- Follow existing API conventions, fully compatible types able to be served by apiserver library, if necessary.
 
 ## Current state
 
-Kubelet currently exposes raw container metrics through the `/stats/` endpoint
-that serves raw container stats. However, this endpoint serves individual
-container stats, and applications like heapster, which aggregates metrics across
-the cluster, must repeatedly query for each container. The high QPS combined
-with the potential data size of raw stats puts unnecessary load on the system
-that could be avoided with an aggregate API. This information is not gathered
-nor served by the Kubernetes API server.
+No API exists for compute resource usage in Kubernetes.
+Heapster aggregates metrics data from nodes and exposes them via REST endpoints.
 
 ## Use cases
 
@@ -77,14 +79,12 @@ kube-ui-v1-nd7in           0.07 cores  130 MB
 A second user will be the scheduler. To assign pods to nodes efficiently, the
 scheduler needs to know the current free resources on each node.
 
-The Kubelet API will be used by heapster to provide metrics at the
-cluster-level. The Kubelet API will also be useful for debugging individual
-nodes, and stand-alone kubelets.
+Auto-scaling features like Horizontal Pod Autoscaler can also consume the Metrics APIs.
 
 ## Proposed endpoints
 
 The metrics API will be its own [API group](api-group.md), and is shared by the
-kubelet and cluster API. The derived metrics include the mean, max and a few
+kubelet and cluster API. The metrics include the mean, max and a few
 percentiles of the list of values, and will initially only be available through
 the API server. The raw metrics include the stat samples from cAdvisor, and will
 only be available through the kubelet. The types of metrics are detailed
@@ -92,39 +92,17 @@ only be available through the kubelet. The types of metrics are detailed
 `/apis/metrics/v1alpha1/`
 
 - `/` - discovery endpoint; type resource list
-- `/rawNodes` - raw host metrics; type `[]metrics.RawNode`
-  - `/rawNodes/localhost` - The only node provided is `localhost`; type
-    metrics.Node
-- `/derivedNodes` - host metrics; type `[]metrics.DerivedNode`
-  - `/derivedNodes/{node}` - derived metrics for a specific node
-- `/rawPods` - All raw pod metrics across all namespaces; type
-  `[]metrics.RawPod`
-- `/derivedPods` - All derived pod metrics across all namespaces; type
-  `[]metrics.DerivedPod`
-- `/namespaces/{namespace}/rawPods` - All raw pod metrics within namespace; type
-  `[]metrics.RawPod`
-  - `/namespaces/{namespace}/rawPods/{pod}` - raw metrics for specific pod
-- `/namespaces/{namespace}/derivedPods` - All derived pod metrics within
-  namespace; type `[]metrics.DerivedPod`
-  - `/namespaces/{namespace}/derivedPods/{pod}` - derived metrics for specific
-  pod
+- `/nodes` - host metrics; type `[]metrics.Node`
+  - `/nodes/{node}` - metrics for a specific node
+- `/pods` - All pod metrics across all namespaces; type
+  `[]metrics.Pod`
+- `/namespaces/{namespace}/pods` - All pod metrics within namespace; type `[]metrics.Pod`
+  - `/namespaces/{namespace}/pods/{pod}` - metrics for specific pod
 - Unsupported paths return status not found (404)
   - `/namespaces/`
   - `/namespaces/{namespace}`
 
-Additionally, all endpoints (except root discovery endpoint) support the
-following optional query parameters:
-
-- `start` - start time to return metrics from; type json encoded
-  `time.Time`; since samples are retrieved at discrete intervals, the first
-  sample after the start time is the actual beginning.
-- `end` - end time to return metrics to; type json encoded `time.Time`
-- `step` - the time step between each stats sample; type int (seconds), default
-  10s, must be a multiple of 10s
-- `count` - maximum number of stats to return in each ContainerMetrics instance;
-  type int
-
-As well as the common query parameters:
+The following query parameters are supported:
 
 - `pretty` - pretty print the response
 - `labelSelector` - restrict the list of returned objects by labels (list endpoints only)
@@ -132,16 +110,12 @@ As well as the common query parameters:
 
 ### Rationale
 
-We are not adding new methods to pods and nodes, e.g.
-`/api/v1/namespaces/myns/pods/mypod/metrics`, for a number of reasons. For
-example, having a separate endpoint allows fetching all the pod metrics in a
-single request. The rate of change of the data is also too high to include in
-the pod resource.
+We are not adding new methods to pods and nodes, e.g. `/api/v1/namespaces/myns/pods/mypod/metrics`, for a number of reasons.
+For example, having a separate endpoint allows fetching all the pod metrics in a single request.
+The rate of change of the data is also too high to include in the pod resource.
+A separate endpoint helps in storing metrics data in a metrics friendly backend storage.
 
-In the future, if any uses cases are found that would benefit from RC,
-namespace or service aggregation, metrics at those levels could also be
-exposed taking advantage of the fact that Heapster already does aggregation
-and metrics for them.
+In the future, if any uses cases are found that would benefit from RC, namespace or service aggregation, metrics at those levels could also be exposed taking advantage of the fact that Heapster already does aggregation and metrics for them.
 
 ## Schema
 
@@ -149,49 +123,30 @@ Types are colocated with other API groups in `/pkg/apis/metrics`, and follow api
 groups conventions there.
 
 ```go
-// Raw metrics are only available through the kubelet API.
-type RawNode struct {
+// Metrics are (initially) only available through the API server.
+type Node struct {
   TypeMeta
   ObjectMeta              // Should include node name
-  Machine ContainerMetrics
-  SystemContainers []ContainerMetrics
+  Machine MetricsWindow
+  SystemContainers []Container
 }
-type RawPod struct {
+type Pod struct {
   TypeMeta
   ObjectMeta              // Should include pod name
   Containers []Container
 }
-type RawContainer struct {
+type Container struct {
   TypeMeta
   ObjectMeta              // Should include container name
-  Spec ContainerSpec      // Mirrors cadvisorv2.ContainerSpec
-  Stats []ContainerStats  // Mirrors cadvisorv2.ContainerStats
-}
-
-// Derived metrics are (initially) only available through the API server.
-type DerivedNode struct {
-  TypeMeta
-  ObjectMeta              // Should include node name
-  Machine MetricsWindow
-  SystemContainers []DerivedContainer
-}
-type DerivedPod struct {
-  TypeMeta
-  ObjectMeta              // Should include pod name
-  Containers []DerivedContainer
-}
-type DerivedContainer struct {
-  TypeMeta
-  ObjectMeta              // Should include container name
-  Metrics DerivedWindows
+  Metrics Windows
 }
 
 // Last overlapping 10s, 1m, 1h and 1d as a start
 // Updated every 10s, so the 10s window is sequential and the rest are
 // rolling.
-type DerivedWindows map[time.Duration]DerivedMetrics
+type Windows map[time.Duration]Metrics
 
-type DerivedMetrics struct {
+type Metrics struct {
 	// End time of all the time windows in Metrics
 	EndTime unversioned.Time `json:"endtime"`
 
@@ -203,63 +158,53 @@ type DerivedMetrics struct {
 type ResourceUsage map[resource.Type]resource.Quantity
 ```
 
-See
-[cadvisor/info/v2](https://github.com/google/cadvisor/blob/master/info/v2/container.go)
-for `ContainerSpec` and `ContainerStats` definitions.
-
 ## Implementation
 
-### Cluster
+There are multiple ways to serve the Metrics APIs from the API server.
+The following are some of the options.
 
-We will use a push based system. Each kubelet will periodically - every 10s -
-POST its derived metrics to the API server. Then, any users of the metrics can
-register as watchers to receive the new metrics when they are available.
+#### First class support in API Server
 
-Users of the metrics may also periodically poll the API server instead of
-registering as a watcher, having in mind that new data may only be available
-every 10 seconds. If any user requires metrics that are either more specific
-(e.g. last 1s) or updated more often, they should use the metrics pipeline via
-Heapster.
-
-The API server will not hold any of this data directly. For our initial
-purposes, it will hold the most recent metrics obtained from each node in
-etcd. Then, when polled for metrics, the API server would only serve said most
-recent data per node.
-
-Benchmarks will be run with etcd to see if it can keep up with the frequent
-writes of data. If it turns out that etcd doesn't scale well enough, we will
-have to switch to a different storage system.
+API server will have the functionality for Metrics API built into it.
+Clients will be able to Get and Watch metrics for nodes and pods.
+The API server will hold only the most recent Metrics sample.
 
 If a pod gets deleted, the API server will get rid of any metrics it may
 currently be holding for it.
 
 The clients watching the metrics data may cache it for longer periods of time.
-The clearest example would be Heapster.
 
-In the future, we might want to store the metrics differently:
+The primary issue with the approach is that etcd is not built to handle metrics data.
+Assuming minutely resolution, 100 nodes and 100 pods per node, the API server will have to handle ~168 QPS.
+Metrics don't have to be persisted.
+Old metrics are not of much use.
+Hence we can avoid storing to etcd and instead store in memory or to an alternate storage.
+If the API server is distributed, the storage medium has to be chosen appropriately.
 
-* via heapster - Since heapster keeps data for a period of time, we could
+The source of the Metrics data can either be kubelet or heapster as of now.
+
+##### Kubelet as the source
+
+Kubelet has cAdvisor compiled into it.
+Hence it has access to all the required metrics.
+It is already built to be able to write to the API server.
+Computing these metrics in the kubelet will help with scalability of the cluster, when compared to computing at the cluster level.
+
+The primary issue with this approach is that of metrics persistence.
+Kubelet has [no checkpointing](https://issues.k8s.io/489) functionlity as of now.
+Kubelet stores metrics data in memory as of now.
+Kubelet restarts will wipe out all historical metrics.
+In-order to survive restarts, metrics data will have to be persisted either using a checkpointed file or by storing data to a local database.
+
+##### Heapster as the source
+
+Heapster queries all historical data 
+Since heapster keeps data for a period of time, we could
   redirect requests to the API server to heapster instead of using etcd. This
   would also allow serving metrics other than the latest ones.
 
-An edge case that this proposal doesn't take into account is kubelets being
-restarted. If any of them are, with a simple implementation they would lose
-historical data and thus take hours to gather enough information to provide
-relevant metrics again. We might want to use persistent storage directly or in
-the future to improve that situation.
-
 More information on kubelet checkpoints can be read on
-[#489](https://issues.k8s.io/489).
-
-### Kubelet
-
-The eventual goal is to use the `apiserver` library to serve kubelet versioned
-APIs. Since the apiserver library is not currently reuseable at the kubelet and
-we do not want to block on it, we will write a simple 1-off solution for this
-API. The 1-off code should be an implementation detail, and the exposed API
-should match the expectations of the API server, so that we can throw away the
-initial implementation when the apiserver is ready to serve the kubelet API. We
-should prioritize replacing it before the API becomes too large or complicated.
+.
 
 
 <!-- BEGIN MUNGE: GENERATED_ANALYTICS -->
