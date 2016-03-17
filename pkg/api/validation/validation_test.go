@@ -1490,6 +1490,16 @@ func TestValidateContainers(t *testing.T) {
 				ImagePullPolicy: "IfNotPresent",
 			},
 		},
+		"Resource CPU less than 10m": {
+			{
+				Name:  "abc-123",
+				Image: "image",
+				Resources: api.ResourceRequirements{
+					Limits: getResourceLimits("9m", "0"),
+				},
+				ImagePullPolicy: "IfNotPresent",
+			},
+		},
 		"Resource Requests CPU invalid": {
 			{
 				Name:  "abc-123",

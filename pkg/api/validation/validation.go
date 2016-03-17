@@ -2023,6 +2023,16 @@ func validateContainerResourceName(value string, fldPath *field.Path) field.Erro
 	return field.ErrorList{}
 }
 
+// Validate resource limits
+// Refer to docs/design/resources.md for more details.
+func validateContainerResourceLimits(resource string, value resource.Quantity, fldPath *field.Path) field.ErrorList {
+	allErrs := field.ErrorList{}
+	if resource == api.ResourceCPU.String() && value.MilliValue() < 10 {
+		return append(allErrs, field.Invalid(fldPath, value, "minimum value is 10m"))
+	}
+	return allErrs
+}
+
 // Validate resource names that can go in a resource quota
 // Refer to docs/design/resources.md for more details.
 func validateResourceQuotaResourceName(value string, fldPath *field.Path) field.ErrorList {
@@ -2346,6 +2356,7 @@ func ValidateResourceRequirements(requirements *api.ResourceRequirements, fldPat
 		if api.IsStandardResourceName(string(resourceName)) {
 			allErrs = append(allErrs, validateBasicResource(quantity, fldPath.Key(string(resourceName)))...)
 		}
+		allErrs = append(allErrs, validateContainerResourceLimits(string(resourceName), quantity, fldPath)...)
 		// Check that request <= limit.
 		requestQuantity, exists := requirements.Requests[resourceName]
 		if exists {
