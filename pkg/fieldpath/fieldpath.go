@@ -65,17 +65,17 @@ func ExtractFieldPathAsString(obj interface{}, fieldPath string) (string, error)
 
 // ExtractResourceValueByContainerName extracts the value of a resource
 // by providing container name
-func ExtractResourceValueByContainerName(fs *api.ResourceFieldSelector, pod *api.Pod, containerName string) (string, error) {
+func ExtractResourceValueByContainerName(fs *api.ResourceFieldSelector, pod *api.Pod, containerName string, allocatable api.ResourceList) (string, error) {
 	container, err := findContainerInPod(pod, containerName)
 	if err != nil {
 		return "", err
 	}
-	return ExtractContainerResourceValue(fs, container)
+	return ExtractContainerResourceValue(fs, container, allocatable)
 }
 
 // ExtractContainerResourceValue extracts the value of a resource
 // in an already known container
-func ExtractContainerResourceValue(fs *api.ResourceFieldSelector, container *api.Container) (string, error) {
+func ExtractContainerResourceValue(fs *api.ResourceFieldSelector, container *api.Container, allocatable api.ResourceList) (string, error) {
 	divisor := resource.Quantity{}
 	if divisor.Cmp(fs.Divisor) == 0 {
 		divisor = resource.MustParse("1")
@@ -85,9 +85,17 @@ func ExtractContainerResourceValue(fs *api.ResourceFieldSelector, container *api
 
 	switch fs.Resource {
 	case "limits.cpu":
-		return convertResourceCPUToString(container.Resources.Limits.Cpu(), divisor)
+		cpuLimits := *container.Resources.Limits.Cpu()
+		if cpuLimits.MilliValue() <= 0 {
+			cpuLimits = allocatable[api.ResourceCPU]
+		}
+		return convertResourceCPUToString(&cpuLimits, divisor)
 	case "limits.memory":
-		return convertResourceMemoryToString(container.Resources.Limits.Memory(), divisor)
+		memoryLimits := *container.Resources.Limits.Memory()
+		if memoryLimits.Value() <= 0 {
+			memoryLimits = allocatable[api.ResourceMemory]
+		}
+		return convertResourceMemoryToString(&memoryLimits, divisor)
 	case "requests.cpu":
 		return convertResourceCPUToString(container.Resources.Requests.Cpu(), divisor)
 	case "requests.memory":

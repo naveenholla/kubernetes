@@ -1554,7 +1554,7 @@ func (kl *Kubelet) makeEnvironmentVariables(pod *api.Pod, container *api.Contain
 					return result, err
 				}
 			case envVar.ValueFrom.ResourceFieldRef != nil:
-				runtimeVal, err = containerResourceRuntimeValue(envVar.ValueFrom.ResourceFieldRef, pod, container)
+				runtimeVal, err = containerResourceRuntimeValue(envVar.ValueFrom.ResourceFieldRef, pod, container, kl.Allocatable)
 				if err != nil {
 					return result, err
 				}
@@ -3153,6 +3153,7 @@ func (kl *Kubelet) setNodeStatusMachineInfo(node *api.Node) {
 			value.Set(0)
 		}
 		node.Status.Allocatable[k] = value
+		kl.Allocatable[k] = value
 	}
 }
 
