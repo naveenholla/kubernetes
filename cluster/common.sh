@@ -762,6 +762,11 @@ EOF
 EVICTION_HARD: $(yaml-quote ${EVICTION_HARD})
 EOF
     fi
+  if [ -n "${EVICTION_HARD_GCI:-}" ]; then
+      cat >>$file <<EOF
+EVICTION_HARD: $(yaml-quote ${EVICTION_HARD_GCI})
+EOF
+    fi
   if [[ "${master}" == "true" && "${MASTER_OS_DISTRIBUTION}" == "coreos" ]] || \
      [[ "${master}" == "false" && "${NODE_OS_DISTRIBUTION}" == "coreos" ]]; then
     # CoreOS-only env vars. TODO(yifan): Make them available on other distros.

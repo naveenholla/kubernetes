@@ -526,8 +526,8 @@ function start-kubelet {
   if [[ -n "${NODE_LABELS:-}" ]]; then
     flags+=" --node-labels=${NODE_LABELS}"
   fi
-  if [[ -n "${EVICTION_HARD:-}" ]]; then
-    flags+=" --eviction-hard=${EVICTION_HARD}"
+  if [[ -n "${EVICTION_HARD_GCI:-}" ]]; then
+    flags+=" --eviction-hard=${EVICTION_HARD_GCI}"
   fi
   if [[ "${ALLOCATE_NODE_CIDRS:-}" == "true" ]]; then
      flags+=" --configure-cbr0=${ALLOCATE_NODE_CIDRS}"
