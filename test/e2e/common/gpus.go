@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package e2e_node
+package common
 
 import (
 	"fmt"
@@ -22,60 +22,35 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/api/v1"
-	"k8s.io/kubernetes/pkg/apis/componentconfig"
 	"k8s.io/kubernetes/test/e2e/framework"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
 
-const acceleratorsFeatureGate = "Accelerators=true"
+// Wait for upto 10 minutes for nvidia drivers to be installed.
+const driverInstallationTimeout = 10 * time.Minute
 
-// Serial because the test updates kubelet configuration.
-var _ = framework.KubeDescribe("GPU [Serial]", func() {
+var _ = framework.KubeDescribe("GPU [Feature:GPU]", func() {
 	f := framework.NewDefaultFramework("gpu-test")
 	Context("attempt to use GPUs if available", func() {
 		It("setup the node and create pods to test gpus", func() {
-			By("ensuring that dynamic kubelet configuration is enabled")
-			enabled, err := isKubeletConfigEnabled(f)
-			framework.ExpectNoError(err)
-			if !enabled {
-				Skip("Dynamic Kubelet configuration is not enabled. Skipping test.")
-			}
-
-			By("enabling support for GPUs")
-			var oldCfg *componentconfig.KubeletConfiguration
-			defer func() {
-				if oldCfg != nil {
-					framework.ExpectNoError(setKubeletConfiguration(f, oldCfg))
+			maxGPUcount := resource.NewQuantity(0, resource.DecimalSI)
+			getGPUsAvailable := func() bool {
+				By("Getting a list node objects from the api server")
+				nodeList, err := f.ClientSet.Core().Nodes().List(metav1.ListOptions{})
+				framework.ExpectNoError(err, "getting node list")
+				for _, node := range nodeList.Items {
+					gpus := node.Status.Capacity.NvidiaGPU()
+					if gpus.Value() > maxGPUcount.Value() {
+						maxGPUcount = gpus
+					}
 				}
-			}()
-
-			oldCfg, err = getCurrentKubeletConfig()
-			framework.ExpectNoError(err)
-			clone, err := api.Scheme.DeepCopy(oldCfg)
-			framework.ExpectNoError(err)
-			newCfg := clone.(*componentconfig.KubeletConfiguration)
-			if newCfg.FeatureGates != "" {
-				newCfg.FeatureGates = fmt.Sprintf("%s,%s", acceleratorsFeatureGate, newCfg.FeatureGates)
-			} else {
-				newCfg.FeatureGates = acceleratorsFeatureGate
+				return maxGPUcount.Value() != 0
 			}
-			framework.ExpectNoError(setKubeletConfiguration(f, newCfg))
-
-			By("Getting the local node object from the api server")
-			nodeList, err := f.ClientSet.Core().Nodes().List(metav1.ListOptions{})
-			framework.ExpectNoError(err, "getting node list")
-			Expect(len(nodeList.Items)).To(Equal(1))
-			node := nodeList.Items[0]
-			gpusAvailable := node.Status.Capacity.NvidiaGPU()
-			By("Skipping the test if GPUs aren't available")
-			if gpusAvailable.IsZero() {
-				Skip("No GPUs available on local node. Skipping test.")
-			}
-
+			Eventually(getGPUsAvailable, driverInstallationTimeout, framework.Poll).Should(Equal(false))
+			gpusAvailable := maxGPUcount
 			By("Creating a pod that will consume all GPUs")
 			podSuccess := makePod(gpusAvailable.Value(), "gpus-success")
 			podSuccess = f.PodClient().CreateSync(podSuccess)
